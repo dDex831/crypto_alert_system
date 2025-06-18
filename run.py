@@ -1,38 +1,36 @@
 from flask import Flask, send_from_directory, request, jsonify
-from app.models.database import init_db, save_price, save_trade
-from app.services.price_tracker import get_current_price
+import sqlite3
+import json
+
+from app.models.database import init_db, DB_PATH
+from app.services.price_tracker import get_price
 from app.services.binance_sync import sync_trades
 from app.services.news_fetcher import fetch_daily_news
 
 app = Flask(
     __name__,
-    static_folder="frontend",      # 靜態檔案目錄
-    static_url_path=""             # 讓 "/" 指向 index.html
+    static_folder="frontend",
+    static_url_path=""
 )
 
-# 啟動時確保資料庫與表存在
+# 啟動時建立表格並拉取一次交易
 init_db()
+sync_trades()
 
 @app.route("/")
 def index():
-    # 直接回傳 frontend/index.html
     return send_from_directory(app.static_folder, "index.html")
 
-# API：取得即時價格
 @app.route("/api/price")
 def api_price():
     symbol = request.args.get("symbol", "cardano")
-    price = get_current_price(symbol)
+    price = get_price(symbol)
     return jsonify({"symbol": symbol, "price": price})
 
-# API：更新門檻（寫入 config.json 或資料庫）
 @app.route("/api/set-threshold", methods=["POST"])
 def api_set_threshold():
     data = request.json
-    # 這裡你可以把設定寫回 config.json 或資料庫
-    # 假設我們寫回 config.json：
-    import json
-    with open("config.json","r+") as f:
+    with open("config.json", "r+") as f:
         cfg = json.load(f)
         cfg.update({
             "symbol": data["symbol"],
@@ -42,14 +40,16 @@ def api_set_threshold():
         f.seek(0); f.truncate(); json.dump(cfg, f, indent=2)
     return jsonify({"ok": True})
 
-# API：回傳交易紀錄
 @app.route("/api/trades")
 def api_trades():
-    # （假設你已經用 sync_trades() 同步過資料庫）
-    import sqlite3
-    conn = sqlite3.connect("app/models/price_history.db")
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("SELECT trade_time, symbol, side, price, quantity FROM trade_history ORDER BY id DESC LIMIT 50")
+    cur.execute("""
+        SELECT trade_time, symbol, side, price, quantity
+        FROM trade_history
+        ORDER BY id DESC
+        LIMIT 50
+    """)
     rows = cur.fetchall()
     conn.close()
     return jsonify([
@@ -57,12 +57,10 @@ def api_trades():
         for r in rows
     ])
 
-# API：回傳當日新聞
 @app.route("/api/news")
 def api_news():
-    news = fetch_daily_news()
-    return jsonify(news)
+    daily = fetch_daily_news()
+    return jsonify(daily)
 
 if __name__ == "__main__":
-    # Flask 伺服器啟動後，打開瀏覽器到 http://127.0.0.1:5000/
     app.run(debug=True)
