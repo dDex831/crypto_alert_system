@@ -8,6 +8,7 @@ crypto_alert_system/
 │   ├─ services/     # 幣價、新聞、Email、Google Sheet
 │   └─ models/       # SQLite 資料庫
 ├─ frontend/         # 控制台靜態頁面
+│     ├─ index.html
 ├─ config.json
 ├─ run.py
 ├─ scheduler.py

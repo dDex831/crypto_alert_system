@@ -1,19 +1,31 @@
 import sqlite3
 import os
+import logging
 
-# 資料庫路徑（相對於專案根目錄）
 DB_PATH = os.path.join(os.path.dirname(__file__), "price_history.db")
 
 def init_db():
-    """初始化資料庫（若尚未建表則建立）"""
+    """初始化所有資料表（如不存在就建立）"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    # 幣價歷史紀錄
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS price_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,  -- 唯一識別編號
-            symbol TEXT NOT NULL,                  -- 幣種代號（如 'ADA', 'BTC'）
-            price REAL NOT NULL,                   -- 當下價格
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP  -- 自動填入時間
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT NOT NULL,
+            price REAL NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    # 交易歷史表
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS trade_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT NOT NULL,         -- 交易對（如 ADAUSDT）
+            side TEXT NOT NULL,           -- 買/賣 (`BUY` or `SELL`)
+            price REAL NOT NULL,          -- 下單價格
+            quantity REAL NOT NULL,       -- 執行數量
+            trade_time DATETIME NOT NULL  -- 交易時間
         )
     """)
     conn.commit()
@@ -23,9 +35,23 @@ def save_price(symbol: str, price: float):
     """寫入一筆幣價資料"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO price_history (symbol, price)
-        VALUES (?, ?)
-    """, (symbol, price))
+    cursor.execute(
+        "INSERT INTO price_history (symbol, price) VALUES (?, ?)",
+        (symbol, price)
+    )
     conn.commit()
     conn.close()
+    logging.info(f"{symbol} price saved: {price}")
+
+def save_trade(symbol: str, side: str, price: float, quantity: float, trade_time: str):
+    """寫入一筆 Binance 交易紀錄"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """INSERT INTO trade_history (symbol, side, price, quantity, trade_time)
+           VALUES (?, ?, ?, ?, ?)""",
+        (symbol, side, price, quantity, trade_time)
+    )
+    conn.commit()
+    conn.close()
+    logging.info(f"Trade saved: {symbol} {side} {quantity}@{price} at {trade_time}")
