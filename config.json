@@ -1,0 +1,10 @@
+{
+  "symbol": "cardano",
+  "threshold_high": 0.9,
+  "threshold_low": 0.5,
+  "email": {
+    "sender": "dex15900122@gmail.com",
+    "receiver": "dex15900122@gmail.com",
+    "password": "yewnvqybfebrdwkk"
+  }
+}
