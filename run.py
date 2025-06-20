@@ -42,20 +42,52 @@ def api_set_threshold():
 
 @app.route("/api/trades")
 def api_trades():
+    import sqlite3
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
+    # 1. 按時間升冪讀出、並合併相同 order_id
     cur.execute("""
-        SELECT trade_time, symbol, side, price, quantity
-        FROM trade_history
-        ORDER BY id DESC
-        LIMIT 50
+      SELECT
+        order_id,
+        symbol,
+        side,
+        price,
+        SUM(quantity)   AS quantity,
+        MIN(trade_time) AS trade_time
+      FROM trade_history
+      GROUP BY order_id
+      ORDER BY datetime(trade_time) ASC
     """)
-    rows = cur.fetchall()
+    records = cur.fetchall()
     conn.close()
-    return jsonify([
-        {"trade_time": r[0], "symbol": r[1], "side": r[2], "price": r[3], "quantity": r[4]}
-        for r in rows
-    ])
+
+    # 2. 計算 profit_pct
+    trades = []
+    last_buy = {}    # 記錄每個 symbol 最後一次買入價格
+    for order_id, symbol, side, price, qty, ttime in records:
+        profit_pct = None
+        side_u = side.upper()
+        if side_u == "BUY":
+            last_buy[symbol] = price
+        elif side_u == "SELL":
+            bp = last_buy.get(symbol)
+            if bp and bp > 0:
+                profit_pct = round((price - bp) / bp * 100, 2)
+
+        trades.append({
+            "trade_time": ttime,
+            "symbol":     symbol,
+            "side":       side_u,
+            "price":      price,
+            "quantity":   qty,
+            "profit_pct": f"{profit_pct:+.2f}%" if profit_pct is not None else "-"
+        })
+
+    # 3. 反轉成最新在前，並只取前 50 筆
+    trades = list(reversed(trades))[:50]
+    return jsonify(trades)
+
+
 
 @app.route("/api/news")
 def api_news():

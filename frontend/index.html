@@ -11,23 +11,15 @@
   <nav class="navbar navbar-expand-lg navbar-light bg-light">
     <div class="container-fluid">
       <a class="navbar-brand" href="#">Crypto Dashboard</a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="#navbarNav" aria-expanded="false" aria-label="Toggle navigation">
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="collapse navbar-collapse" id="navbarNav">
         <ul class="navbar-nav">
-          <li class="nav-item">
-            <a class="nav-link active" data-tab="price" href="#">價格設定</a>
-          </li>
-          <li class="nav-item">
-            <a class="nav-link" data-tab="trades" href="#">交易紀錄</a>
-          </li>
-          <li class="nav-item">
-            <a class="nav-link" data-tab="news" href="#">新聞摘要</a>
-          </li>
-          <li class="nav-item">
-            <a class="nav-link" data-tab="tools" href="#">工具</a>
-          </li>
+          <li class="nav-item"><a class="nav-link active" data-tab="price" href="#">價格設定</a></li>
+          <li class="nav-item"><a class="nav-link" data-tab="trades" href="#">交易紀錄</a></li>
+          <li class="nav-item"><a class="nav-link" data-tab="news" href="#">新聞摘要</a></li>
+          <li class="nav-item"><a class="nav-link" data-tab="tools" href="#">工具</a></li>
         </ul>
       </div>
     </div>
@@ -38,21 +30,10 @@
     <section id="price" class="tab-content">
       <h3>價格追蹤設定</h3>
       <form id="thresholdForm" class="row g-3">
-        <div class="col-md-4">
-          <label for="symbolInput" class="form-label">幣種</label>
-          <input type="text" class="form-control" id="symbolInput" value="cardano">
-        </div>
-        <div class="col-md-4">
-          <label for="lowInput" class="form-label">價格下限</label>
-          <input type="number" step="0.01" class="form-control" id="lowInput" value="0.5">
-        </div>
-        <div class="col-md-4">
-          <label for="highInput" class="form-label">價格上限</label>
-          <input type="number" step="0.01" class="form-control" id="highInput" value="0.8">
-        </div>
-        <div class="col-12">
-          <button type="submit" class="btn btn-primary">更新設定</button>
-        </div>
+        <div class="col-md-4"><label for="symbolInput" class="form-label">幣種</label><input type="text" class="form-control" id="symbolInput" value="cardano"></div>
+        <div class="col-md-4"><label for="lowInput" class="form-label">價格下限</label><input type="number" step="0.01" class="form-control" id="lowInput" value="0.5"></div>
+        <div class="col-md-4"><label for="highInput" class="form-label">價格上限</label><input type="number" step="0.01" class="form-control" id="highInput" value="0.8"></div>
+        <div class="col-12"><button type="submit" class="btn btn-primary">更新設定</button></div>
       </form>
       <hr>
       <h5>最新價格</h5>
@@ -63,9 +44,7 @@
     <section id="trades" class="tab-content d-none">
       <h3>幣安交易紀錄</h3>
       <table class="table table-striped" id="tradesTable">
-        <thead>
-          <tr><th>時間</th><th>幣種</th><th>買/賣</th><th>價格</th><th>數量</th></tr>
-        </thead>
+        <thead><tr><th>時間</th><th>幣種</th><th>買/賣</th><th>價格</th><th>數量</th><th>獲利%</th></tr></thead>
         <tbody></tbody>
       </table>
     </section>
@@ -87,6 +66,7 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <!-- 自訂 JS -->
   <script>
+    // 分頁切換功能
     document.querySelectorAll('.nav-link').forEach(link => {
       link.addEventListener('click', e => {
         e.preventDefault();
@@ -106,7 +86,7 @@
       document.getElementById('latestPrice').textContent = `${symbol.toUpperCase()}: $${data.price}`;
     }
     fetchLatestPrice();
-    setInterval(fetchLatestPrice, 600000); // 每10分鐘更新一次
+    setInterval(fetchLatestPrice, 600000);
 
     // 提交設定表單
     document.getElementById('thresholdForm').addEventListener('submit', async e => {
@@ -116,15 +96,11 @@
         low: parseFloat(document.getElementById('lowInput').value),
         high: parseFloat(document.getElementById('highInput').value)
       };
-      await fetch('/api/set-threshold', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
+      await fetch('/api/set-threshold', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
       alert('設定已更新！');
     });
 
-    // 抓交易紀錄
+    // 載入交易紀錄
     async function loadTrades() {
       const res = await fetch('/api/trades');
       const trades = await res.json();
@@ -137,24 +113,44 @@
           <td>${t.side}</td>
           <td>${t.price}</td>
           <td>${t.quantity}</td>
+          <td>${t.profit_pct === '-' ? '-' : t.profit_pct}</td>
         `;
         tbody.appendChild(tr);
       });
     }
-    // 當切到交易紀錄頁時載入
     document.querySelector('[data-tab="trades"]').addEventListener('click', loadTrades);
 
-    // 抓新聞
+    // 載入新聞摘要，顯示全文
     async function loadNews() {
       const res = await fetch('/api/news');
-      const news = await res.json();
-      const container = document.getElementById('newsContainer'); container.innerHTML = '';
-      news.forEach(item => {
+      const data = await res.json();
+      const container = document.getElementById('newsContainer');
+      container.innerHTML = '';
+
+      // 區塊鏈
+      container.innerHTML += '<h5>🔗 區塊鏈熱門文章</h5>';
+      data.blockchain.forEach(item => {
         const div = document.createElement('div');
-        div.innerHTML = `<h5>${item.title}</h5><p><a href="${item.url}" target="_blank">閱讀原文</a></p>`;
+        div.className = 'mb-4';
+        div.innerHTML = `
+          <p>${item.title}</p>
+          ${item.image ? `<img src="${item.image}" style="max-width:100%;border-radius:8px;" />` : ''}
+        `;
         container.appendChild(div);
       });
-    }
+
+      // 經濟
+      container.innerHTML += '<h5>💹 經濟熱門文章</h5>';
+      data.economy.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'mb-4';
+        div.innerHTML = `
+          <p>${item.title}</p>
+          ${item.image ? `<img src="${item.image}" style="max-width:100%;border-radius:8px;" />` : ''}
+        `;
+        container.appendChild(div);
+      });
+}
     document.querySelector('[data-tab="news"]').addEventListener('click', loadNews);
   </script>
 </body>

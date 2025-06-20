@@ -1,81 +1,64 @@
-# 文件：app/services/news_fetcher.py
-"""
-新聞擷取模組
-提供：
- - fetch_top_blockchain_news(): 回傳區塊鏈主題最高互動文章清單
- - fetch_top_economy_news(): 回傳經濟主題最高互動文章清單
- - fetch_daily_news(): 同時回傳兩類每日摘要
-"""
-from typing import List, Dict
+# 文件：app/services/price_tracker.py
 
-# TODO: 使用 Twitter API v2 或 News API 實作
-
-# 範例使用 Twitter API v2，需先申請 Bearer Token
-BEARER_TOKEN = "YOUR_TWITTER_BEARER_TOKEN"
 import requests
+import logging
+from app.models.database import init_db, save_price
 
-SEARCH_HEADERS = {
-    "Authorization": f"Bearer {BEARER_TOKEN}"
-}
+# 先初始化資料表（price_history）
+init_db()
 
-# 查詢參數，可依需求調整
-BLOCKCHAIN_QUERY = "blockchain OR crypto"
-ECONOMY_QUERY = "economy OR inflation OR fed"
-MAX_RESULTS = 10
+COINGECKO_URL = 'https://api.coingecko.com/api/v3/simple/price'
 
+def get_price(symbol: str) -> float:
+    """
+    取得指定幣種的 USD 價格
+    symbol: CoinGecko 上的 id，例如 'cardano', 'bitcoin'
+    回傳 float 價格，失敗時丟出例外
+    """
+    try:
+        resp = requests.get(
+            f"{COINGECKO_URL}?ids={symbol}&vs_currencies=usd",
+            timeout=10
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data[symbol]['usd']
+    except Exception as e:
+        logging.error(f"get_price 失敗 ({symbol}): {e}")
+        raise
 
-def fetch_top_blockchain_news() -> List[Dict]:
-    """回傳 list[{'title': str, 'url': str}]"""
-    url = "https://api.twitter.com/2/tweets/search/recent"
-    params = {
-        'query': BLOCKCHAIN_QUERY,
-        'max_results': MAX_RESULTS,
-        'tweet.fields': 'public_metrics,created_at'
-    }
-    resp = requests.get(url, headers=SEARCH_HEADERS, params=params)
-    resp.raise_for_status()
-    data = resp.json().get('data', [])
-    # 依互動數排序 (likes + retweets)
-    sorted_list = sorted(
-        data,
-        key=lambda x: x['public_metrics']['like_count'] + x['public_metrics']['retweet_count'],
-        reverse=True
+def check_and_save(symbol: str) -> float:
+    """
+    抓價格並寫入資料庫
+    回傳當下價格
+    """
+    price = get_price(symbol)
+    save_price(symbol, price)
+    logging.info(f"{symbol.upper()} 價格已寫入：{price}")
+    return price
+
+def list_price_history(limit: int = 100) -> list[dict]:
+    """
+    回傳最近的 price_history 紀錄
+    limit: 最多筆數，預設 100
+    回傳格式：[{ 'symbol': ..., 'price': ..., 'timestamp': ... }, …]
+    """
+    import sqlite3
+    from os.path import dirname, join
+
+    db = join(dirname(dirname(__file__)), 'models', 'price_history.db')
+    conn = sqlite3.connect(db)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT symbol, price, timestamp "
+        "FROM price_history "
+        "ORDER BY id DESC "
+        "LIMIT ?",
+        (limit,)
     )
-    top = sorted_list[:1]
-    return [{
-        'title': t['text'][:50] + '...',  # 取前50字
-        'url': f"https://twitter.com/i/web/status/{t['id']}"
-    } for t in top]
-
-
-def fetch_top_economy_news() -> List[Dict]:
-    """回傳 list[{'title': str, 'url': str}]"""
-    url = "https://api.twitter.com/2/tweets/search/recent"
-    params = {
-        'query': ECONOMY_QUERY,
-        'max_results': MAX_RESULTS,
-        'tweet.fields': 'public_metrics,created_at'
-    }
-    resp = requests.get(url, headers=SEARCH_HEADERS, params=params)
-    resp.raise_for_status()
-    data = resp.json().get('data', [])
-    sorted_list = sorted(
-        data,
-        key=lambda x: x['public_metrics']['like_count'] + x['public_metrics']['retweet_count'],
-        reverse=True
-    )
-    top = sorted_list[:1]
-    return [{
-        'title': t['text'][:50] + '...',
-        'url': f"https://twitter.com/i/web/status/{t['id']}"
-    } for t in top]
-
-
-def fetch_daily_news() -> Dict[str, List[Dict]]:
-    """同時回傳區塊鏈與經濟主題的每日熱門文章"""
-    blockchain = fetch_top_blockchain_news()
-    economy = fetch_top_economy_news()
-    return {
-        'blockchain': blockchain,
-        'economy': economy
-    }
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {'symbol': r[0], 'price': r[1], 'timestamp': r[2]}
+        for r in rows
+    ]
