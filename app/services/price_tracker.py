@@ -7,23 +7,25 @@ from datetime import datetime, timedelta
 import requests
 import gspread
 from app.models.database import init_db, save_price, DB_PATH
+import json
 
 # 初始化資料表（price_history）
 init_db()
 
 COINGECKO_URL = 'https://api.coingecko.com/api/v3/simple/price'
 
-# Google Sheets 設定（環境變數或直接寫入）
-GS_CREDENTIALS_JSON = os.getenv('GOOGLE_SHEETS_CREDENTIALS_JSON', 'credentials.json')
-GS_SHEET_KEY         = os.getenv('GOOGLE_SHEET_KEY', 'your_sheet_key')
-GS_WORKSHEET_NAME    = os.getenv('GOOGLE_SHEET_WORKSHEET', 'PriceLog')
+# Google Sheets 設定
+# GOOGLE_SA_JSON: 環境變數裡的整段 service account JSON
+# GOOGLE_SHEET_KEY: 試算表 ID
+# GOOGLE_SHEET_WORKSHEET: 工作表名稱
+GOOGLE_SA_JSON      = os.environ.get('GOOGLE_SA_JSON', '')
+GS_SHEET_KEY        = os.environ.get('GOOGLE_SHEET_KEY', '')
+GS_WORKSHEET_NAME   = os.environ.get('GOOGLE_SHEET_WORKSHEET', '')
 
 
 def get_price(symbol: str) -> float:
     """
     取得指定幣種的 USD 價格
-    symbol: CoinGecko 上的 id，例如 'cardano', 'bitcoin'
-    回傳 float 價格，失敗時丟出例外
     """
     try:
         resp = requests.get(f"{COINGECKO_URL}?ids={symbol}&vs_currencies=usd", timeout=10)
@@ -39,8 +41,8 @@ def purge_old_prices(days: int = 30):
     """
     刪除 price_history 中超過 days 天的舊資料
     """
+    conn = sqlite3.connect(DB_PATH)
     try:
-        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cutoff = datetime.now() - timedelta(days=days)
         cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M:%S")
@@ -57,15 +59,24 @@ def record_to_sheet(symbol: str, price: float):
     """
     當價格漲跌超過 ±5% 時，把記錄追加到 Google Sheet
     """
+    if not GOOGLE_SA_JSON or not GS_SHEET_KEY or not GS_WORKSHEET_NAME:
+        logging.warning("Google Sheet 設定不完整，跳過 record_to_sheet")
+        return
+
     try:
-        gc = gspread.service_account(filename=GS_CREDENTIALS_JSON)
+        # 從環境變數解析憑證
+        sa_info = json.loads(GOOGLE_SA_JSON)
+        gc = gspread.service_account_from_dict(sa_info)
+
         sh = gc.open_by_key(GS_SHEET_KEY)
         ws = sh.worksheet(GS_WORKSHEET_NAME)
+
         rows = ws.get_all_values()
         if len(rows) > 1:
             last_price = float(rows[-1][2])  # 假設欄位: 時間, 幣種, 價格, 漲跌%
         else:
             last_price = price
+
         pct = (price - last_price) / last_price * 100 if last_price > 0 else 0
         if abs(pct) >= 5:
             now = datetime.now().isoformat(sep=' ')
@@ -92,15 +103,15 @@ def check_and_save(symbol: str) -> float:
 def list_price_history(limit: int = 100) -> list[dict]:
     """
     回傳最近的 price_history 紀錄
-    limit: 最多筆數，預設 100
-    回傳格式：[{ 'symbol': ..., 'price': ..., 'timestamp': ... }, …]
     """
     conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT symbol, price, timestamp FROM price_history ORDER BY id DESC LIMIT ?",
-        (limit,)
-    )
-    rows = cursor.fetchall()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT symbol, price, timestamp FROM price_history ORDER BY id DESC LIMIT ?",
+            (limit,)
+        )
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
     return [{'symbol': r[0], 'price': r[1], 'timestamp': r[2]} for r in rows]
