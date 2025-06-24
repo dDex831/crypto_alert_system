@@ -135,39 +135,11 @@ PWA 支援：可離線瀏覽、支援桌面/手機安裝
 
 Bootstrap 5 樣式，響應式設計
 
-開發與執行
-開發模式（推薦開發與測試 API）
-啟動 Flask 後端於 5000 端口：
 
-bash
-複製
-編輯
-python run.py
-另開新終端機，啟動 React 前端（於 frontend 目錄）：
-
-bash
-複製
-編輯
-cd frontend
-npm install   # 僅第一次需安裝相依套件
-npm start
 瀏覽 http://localhost:3000
 頁面自動 proxy API 請求到 Flask (http://localhost:5000)
 
-Build 生產部署
-打包前端靜態檔案：
-
-bash
-複製
-編輯
-cd frontend
-npm run build
-Flask 會自動將 frontend/build 內檔案作為靜態網頁與 SPA 路由服務。
-
-前端資料夾結構
-text
-複製
-編輯
+```text
 frontend/
 ├─ public/
 │   ├─ index.html
@@ -181,8 +153,5 @@ frontend/
     │   ├─ NewsPage.js
     │   └─ ToolsPage.js
     └─ ...
-常見指令
-指令	說明
-npm start	開發伺服器，熱更新
-npm run build	打包生產用靜態檔
-npm run lint	程式碼風格檢查（如有安裝）
+```
+
