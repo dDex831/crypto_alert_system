@@ -5,12 +5,15 @@ from app.models.database import init_db, DB_PATH
 from app.services.price_tracker import get_price
 from app.services.binance_sync import sync_trades
 from app.services.news_fetcher import fetch_daily_news
+from flask_cors import CORS
+
 
 app = Flask(
     __name__,
-    static_folder="frontend",
+    static_folder="frontend/build",  # React build 輸出
     static_url_path=""
 )
+CORS(app)  # 這一行一定要在所有 route 之前
 
 # 啟動時建立表格並拉取一次交易
 init_db()
@@ -146,3 +149,4 @@ def delete_note(note_id):
 
 if __name__ == "__main__":
     app.run(debug=True)
+   

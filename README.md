@@ -89,7 +89,14 @@ crypto_alert_system/
 │   ├─ services/          # 幣價、新聞、Email、Google Sheet 模組
 │   └─ models/            # SQLite 資料模型
 ├─ frontend/
-│   └─ index.html         # 控制面板靜態頁面
+│   ├─ public/
+│   │   ├─ index.html
+│   │   ├─ manifest.json
+│   │   ├─ favicon.ico
+│   │   └─ ...
+│   └─ src/
+│       ├─ App.js
+│       └─ ...
 ├─ config.json            # 系統配置檔
 ├─ run.py                 # 主流程啟動腳本
 ├─ scheduler.py           # 任務排程腳本
@@ -113,3 +120,69 @@ crypto_alert_system/
 
 ## 授權 License
 本專案採用 MIT License，詳見 LICENSE 檔案。
+
+
+前端控制面板（React + PWA）
+新版前端控制面板以 React 重新開發，支援多頁切換與 PWA (Progressive Web App) 離線安裝，
+提供即時行情、交易紀錄、新聞摘要與筆記管理等功能，介面現代化且可直接安裝到手機桌面。
+
+特色
+多頁式 UI（價格設定、交易紀錄、新聞摘要、筆記管理）
+
+即時 API 串接 Flask 後端
+
+PWA 支援：可離線瀏覽、支援桌面/手機安裝
+
+Bootstrap 5 樣式，響應式設計
+
+開發與執行
+開發模式（推薦開發與測試 API）
+啟動 Flask 後端於 5000 端口：
+
+bash
+複製
+編輯
+python run.py
+另開新終端機，啟動 React 前端（於 frontend 目錄）：
+
+bash
+複製
+編輯
+cd frontend
+npm install   # 僅第一次需安裝相依套件
+npm start
+瀏覽 http://localhost:3000
+頁面自動 proxy API 請求到 Flask (http://localhost:5000)
+
+Build 生產部署
+打包前端靜態檔案：
+
+bash
+複製
+編輯
+cd frontend
+npm run build
+Flask 會自動將 frontend/build 內檔案作為靜態網頁與 SPA 路由服務。
+
+前端資料夾結構
+text
+複製
+編輯
+frontend/
+├─ public/
+│   ├─ index.html
+│   ├─ manifest.json
+│   └─ ...
+└─ src/
+    ├─ App.js
+    ├─ pages/
+    │   ├─ PricePage.js
+    │   ├─ TradesPage.js
+    │   ├─ NewsPage.js
+    │   └─ ToolsPage.js
+    └─ ...
+常見指令
+指令	說明
+npm start	開發伺服器，熱更新
+npm run build	打包生產用靜態檔
+npm run lint	程式碼風格檢查（如有安裝）
