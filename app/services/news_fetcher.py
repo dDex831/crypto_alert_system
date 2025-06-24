@@ -1,60 +1,40 @@
-# 文件：app/services/news_fetcher.py
-"""
-新聞擷取模組（Twitter + 快取 + 圖片 + 每日清除）
-提供：
- - fetch_top_blockchain_news(): 回傳區塊鏈主題最高互動文章（一筆）
- - fetch_top_economy_news(): 回傳純經濟相關最高互動文章（一筆）
- - fetch_daily_news(): 同時回傳兩類每日摘要，並管理快取與每日清除
-"""
-import os
-import logging
-import json
-import time
-from datetime import datetime, timedelta, date
-from typing import List, Dict, Tuple, Any
-from pathlib import Path
-from urllib.parse import unquote
-import requests
-from dotenv import load_dotenv
+import os  # 存取環境變數與檔案系統
+import logging  # 日誌紀錄
+import json  # JSON 編碼與解碼
+import time  # 處理時間戳記
+from datetime import datetime  # 日期時間操作
+from typing import List, Dict, Any  # 型別註解
+from pathlib import Path  # 處理檔案路徑
+import requests  # HTTP 請求
+from dotenv import load_dotenv  # 讀取 .env
 
-load_dotenv()
+load_dotenv()  # 載入環境變數
 
-# Twitter API 設定
-raw_token = os.getenv("TWITTER_BEARER_TOKEN", "")
-BEARER_TOKEN = unquote(raw_token)
-HEADERS = {"Authorization": f"Bearer {BEARER_TOKEN}"} if BEARER_TOKEN else {}
-TW_API_URL = "https://api.twitter.com/2/tweets/search/recent"
-MAX_RESULTS = 10
+# ----- CryptoCompare Public API 設定 -----
+CRYPTOCOMPARE_KEY = os.getenv("CRYPTOCOMPARE_API_KEY", "")
+CRYPTOCOMPARE_URL = "https://min-api.cryptocompare.com/data/v2/news/"
+CC_HEADERS = {"authorization": f"Apikey {CRYPTOCOMPARE_KEY}"} if CRYPTOCOMPARE_KEY else {}
 
-# 查詢參數
-BLOCKCHAIN_QUERY = "blockchain OR crypto"
-ECONOMY_QUERY   = "(economy OR inflation OR fed) -blockchain -crypto"
+# ----- NewsAPI.org 設定 -----
+NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")
+NEWSAPI_URL = "https://newsapi.org/v2/top-headlines"
 
-# 快取檔
+# ----- 快取檔路徑 -----
 CACHE_FILE = Path(__file__).parent / ".news_cache.json"
-
-# Twitter API call base parameters
-TW_PARAMS_BASE = {
-    "max_results": MAX_RESULTS,
-    "tweet.fields": "public_metrics,created_at,attachments",
-    "expansions": "attachments.media_keys",
-    "media.fields": "url"
-}
 
 
 def _load_cache() -> Dict[str, Any]:
     """
-    讀取快取，並於每日 8:00 過後清除昨日快取
+    讀取並驗證快取，若今日08:00後快取屬昨日即清除
     """
     if not CACHE_FILE.exists():
         return {}
     try:
         data = json.loads(CACHE_FILE.read_text())
     except Exception:
-        logging.warning("快取檔讀取失敗，將重新抓取")
+        logging.warning("快取讀取失敗，將重新抓取")
         return {}
 
-    # 刪除昨日快取：若已過今日08:00且為昨日資料，則視為失效
     ts = data.get("_ts", 0)
     cache_dt = datetime.fromtimestamp(ts)
     now = datetime.now()
@@ -64,124 +44,102 @@ def _load_cache() -> Dict[str, Any]:
         except Exception:
             pass
         return {}
-
     return data
 
 
 def _save_cache(blockchain: List[Dict], economy: List[Dict]):
-    """將最新文章寫入快取，附上時間戳"""
+    """保存最新兩主題文章至快取並附時間戳"""
     CACHE_FILE.write_text(json.dumps({
         "_ts": time.time(),
         "blockchain": blockchain,
-        "economy":   economy
+        "economy": economy
     }))
 
 
-def _search_twitter(query: str) -> Tuple[List[Dict], Dict[str, str]]:
-    """呼叫 Twitter API，失敗或限流時回空"""
-    if not BEARER_TOKEN:
-        logging.warning("TWITTER_BEARER_TOKEN 未設定，跳過 Twitter 搜尋")
-        return [], {}
-    try:
-        resp = requests.get(
-            TW_API_URL,
-            headers=HEADERS,
-            params={**TW_PARAMS_BASE, "query": query},
-            timeout=10
-        )
-        resp.raise_for_status()
-        j = resp.json()
-        tweets = j.get("data", [])
-        includes = j.get("includes", {})
-        media_map = { m.get("media_key"): m.get("url") for m in includes.get("media", []) }
-        return tweets, media_map
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Twitter API ({query}) 失敗: {e}")
-        return [], {}
-
-
-def _top_one_with_media(raw: List[Dict], media_map: Dict[str, str]) -> List[Dict]:
-    """取得最高互動推文，回傳完整文字、連結、圖片"""
-    if not raw:
+def _search_cryptocompare() -> List[Dict]:
+    """
+    使用 CryptoCompare Public API 抓取 Cardano (ADA) 相關新聞
+    """
+    if not CRYPTOCOMPARE_KEY:
+        logging.warning("CRYPTOCOMPARE_API_KEY 未設定，跳過區塊鏈新聞搜尋")
         return []
-    t = sorted(
-        raw,
-        key=lambda x: x.get("public_metrics", {}).get("like_count", 0)
-                  + x.get("public_metrics", {}).get("retweet_count", 0),
-        reverse=True
-    )[0]
-    img = None
-    for mk in t.get("attachments", {}).get("media_keys", []):
-        if mk in media_map:
-            img = media_map[mk]
-            break
-    return [{
-        "title": t.get("text", ""),
-        "url":   f"https://twitter.com/i/web/status/{t.get('id')}",
-        "image": img
-    }]
+    params = {
+        "categories": "ADA",
+        "lang": "EN"
+    }
+    try:
+        resp = requests.get(CRYPTOCOMPARE_URL, headers=CC_HEADERS, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        articles = data.get("Data", [])
+        if not articles:
+            return []
+        # 依 published_on (Unix timestamp) 選取最新一筆
+        top = sorted(articles, key=lambda x: x.get("published_on", 0), reverse=True)[0]
+        source = top.get("source_info", {}).get("name", "CryptoCompare")
+        return [{
+            "title": top.get("title"),
+            "url": top.get("url"),
+            "image": top.get("imageurl"),
+            "source": source
+        }]
+    except requests.exceptions.RequestException as e:
+        logging.error(f"CryptoCompare API 失敗: {e}")
+        return []
+
+
+def _search_newsapi_economy() -> List[Dict]:
+    """
+    使用 NewsAPI.org 抓取純經濟相關新聞
+    """
+    if not NEWSAPI_KEY:
+        logging.warning("NEWSAPI_KEY 未設定，跳過經濟新聞搜尋")
+        return []
+    params = {
+        "apiKey": NEWSAPI_KEY,
+        "category": "business",
+        "q": "economy",
+        "pageSize": 1,
+        "language": "en"
+    }
+    try:
+        resp = requests.get(NEWSAPI_URL, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        articles = data.get("articles", [])
+        if not articles:
+            return []
+        a = articles[0]
+        return [{
+            "title": a.get("title"),
+            "url": a.get("url"),
+            "image": a.get("urlToImage"),
+            "source": a.get("source", {}).get("name", "NewsAPI")
+        }]
+    except requests.exceptions.RequestException as e:
+        logging.error(f"NewsAPI.org 經濟新聞 API 失敗: {e}")
+        return []
+
 
 def fetch_top_blockchain_news() -> List[Dict]:
-    """
-    回傳昨天發布之區塊鏈主題最高互動文章（一筆）
-    """
-    raw, media_map = _search_twitter(BLOCKCHAIN_QUERY)
-    # 計算昨天日期
-    yesterday = date.today() - timedelta(days=1)
-    # 過濾出 created_at 屬性等於昨天的推文
-    filtered = []
-    for t in raw:
-        try:
-            # Twitter 回傳的 created_at 範例: "2025-06-19T14:23:00.000Z"
-            dt = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
-            if dt.date() == yesterday:
-                filtered.append(t)
-        except Exception:
-            continue
-    # 如果昨天沒資料，就保留所有 raw
-    if not filtered:
-        filtered = raw
-    return _top_one_with_media(filtered, media_map)
+    """回傳 Cardano 主題最新文章（一筆）"""
+    return _search_cryptocompare()
+
 
 def fetch_top_economy_news() -> List[Dict]:
-    """
-    回傳昨天發布之純經濟相關最高互動文章（一筆）
-    """
-    raw, media_map = _search_twitter(ECONOMY_QUERY)
-    yesterday = date.today() - timedelta(days=1)
-    filtered = []
-    for t in raw:
-        try:
-            dt = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
-            if dt.date() == yesterday:
-                filtered.append(t)
-        except Exception:
-            continue
-    if not filtered:
-        filtered = raw
-    return _top_one_with_media(filtered, media_map)
+    """回傳純經濟相關最高互動文章（一筆）"""
+    return _search_newsapi_economy()
 
 
 def fetch_daily_news() -> Dict[str, List[Dict]]:
-    """
-    主流程：
-    1. 嘗試讀取快取
-    2. 若兩種文章都已有快取，直接回傳
-    3. 否則僅對缺失的類別呼叫 API，保留已有快取
-    4. 用新結果覆寫快取
-    """
+    """主流程：同時取得 Cardano 與經濟新聞，並管理快取與每日清除"""
     cache = _load_cache()
     bc_cached = cache.get("blockchain", [])
     ec_cached = cache.get("economy", [])
-
-    # 若兩類都有快取且非空，直接回傳
     if bc_cached and ec_cached:
         return {"blockchain": bc_cached, "economy": ec_cached}
 
-    # 僅對缺失一方呼叫 API
-    bc = bc_cached or fetch_top_blockchain_news()
-    ec = ec_cached or fetch_top_economy_news()
-
-    # API 呼叫後立即覆寫快取
+    bc = bc_cached or _search_cryptocompare()
+    ec = ec_cached or _search_newsapi_economy()
     _save_cache(bc, ec)
     return {"blockchain": bc, "economy": ec}
