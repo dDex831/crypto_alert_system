@@ -122,7 +122,7 @@ crypto_alert_system/
 本專案採用 MIT License，詳見 LICENSE 檔案。
 
 
-前端控制面板（React + PWA）
+## 前端控制面板（React + PWA）
 新版前端控制面板以 React 重新開發，支援多頁切換與 PWA (Progressive Web App) 離線安裝，
 提供即時行情、交易紀錄、新聞摘要與筆記管理等功能，介面現代化且可直接安裝到手機桌面。
 
