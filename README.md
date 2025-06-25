@@ -21,64 +21,7 @@ Crypto Alert System 是一個自動化的加密貨幣監控與通知系統，主
 4. **排程執行**：
    - `scheduler.py` 設定任務排程（可搭配系統排程或服務管理器運行）
 5. **控制面板**：
-   - 靜態 HTML，可透過簡易 HTTP 伺服器提供本地查看
-
-## 環境需求
-- Python 3.8 以上
-- SQLite（內建，不需額外安裝）
-- Docker（選用）
-- 其他依賴請見 `requirements.txt`
-
-## 快速上手
-1. **Clone 專案**
-   ```bash
-   git clone https://github.com/dDex831/crypto_alert_system.git
-   cd crypto_alert_system
-   ```
-2. **安裝套件**
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. **建立並編輯 `config.json`**（範例）
-   ```json
-   {
-     "alert": {
-       "symbols": ["ADA", "BTC"],
-       "thresholds": {
-         "ADA": {"min": 0.8, "max": 1.2},
-         "BTC": {"min": 30000, "max": 60000}
-       },
-       "email": {
-         "smtp_server": "smtp.example.com",
-         "smtp_port": 587,
-         "username": "your_email@example.com",
-         "password": "your_email_password",
-         "recipients": ["alert1@example.com", "alert2@example.com"]
-       }
-     },
-     "google_sheet": {
-       "spreadsheet_id": "YOUR_SPREADSHEET_ID",
-       "credentials_file": "credentials.json"
-     },
-     "schedule": {
-       "price_interval_hours": 1,
-       "news_time": "08:00"
-     }
-   }
-   ```
-4. **執行主流程**
-   ```bash
-   python run.py
-   ```
-5. **使用排程腳本**
-   ```bash
-   python scheduler.py
-   ```
-6. **啟動前端面板**
-   ```bash
-   cd frontend
-   python -m http.server 8000
-   ```
+   - 前端控制面板（React + PWA）
 
 ## 專案結構
 ```text
@@ -105,21 +48,7 @@ crypto_alert_system/
 └─ README.md              # 專案說明
 ```
 
-## Docker 使用
-1. **建構映像**
-   ```bash
-   docker build -t crypto-alert .
-   ```
-2. **執行容器**
-   ```bash
-   docker run -d \
-     -v $(pwd)/config.json:/app/config.json \
-     -v $(pwd)/credentials.json:/app/credentials.json \
-     crypto-alert
-   ```
 
-## 授權 License
-本專案採用 MIT License，詳見 LICENSE 檔案。
 
 
 ## 前端控制面板（React + PWA）
@@ -154,4 +83,11 @@ frontend/
     │   └─ ToolsPage.js
     └─ ...
 ```
+啟動 Flask 後端於 5000 端口：
+python run.py
+另開新終端機，啟動 React 前端（於 frontend 目錄）：
+
+cd frontend
+npm install   # 僅第一次需安裝相依套件
+npm start
 

@@ -32,7 +32,6 @@ export default function TradesPage() {
               <th>幣種</th>
               <th>買/賣</th>
               <th>價格</th>
-              <th>數量</th>
               <th>獲利%</th>
             </tr>
           </thead>
@@ -43,7 +42,6 @@ export default function TradesPage() {
                 <td>{t.symbol}</td>
                 <td>{t.side}</td>
                 <td>{t.price}</td>
-                <td>{t.quantity}</td>
                 <td>{t.profit_pct}</td>
               </tr>
             ))}
