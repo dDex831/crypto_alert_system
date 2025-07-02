@@ -1,12 +1,12 @@
-# run.py
-
 import os
 import json
 import threading
 import time
 import sqlite3
+import smtplib
+from email.mime.text import MIMEText
 
-from flask import Flask, send_from_directory, request, jsonify, abort
+from flask import Flask, send_from_directory, request, jsonify, abort, Response
 from flask_cors import CORS
 from flask_socketio import SocketIO
 
@@ -14,6 +14,31 @@ from app.models.database import init_db, save_price, DB_PATH
 from app.services.price_tracker import get_price
 from app.services.binance_sync import sync_trades
 from app.services.news_fetcher import fetch_daily_news
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+
+
+# --- Prometheus 指標 ---
+PRICE_SUCCESS = Counter(
+    'price_fetch_success_total',
+    '價格抓取成功次數',
+    ['symbol']
+)
+PRICE_FAILURE = Counter(
+    'price_fetch_failure_total',
+    '價格抓取失敗次數',
+    ['symbol']
+)
+PRICE_DURATION = Histogram(
+    'price_fetch_duration_seconds',
+    '價格抓取耗時 (秒)',
+    ['symbol']
+)
+PRICE_EMIT = Counter(
+    'price_emit_total',
+    '推送價格更新次數',
+    ['symbol']
+)
+
 
 # === 1. 讀取 config.json ===
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -24,10 +49,30 @@ SYMBOL = cfg.get("symbol", "cardano")
 THRESHOLD_LOW = cfg.get("threshold_low", 0.5)
 THRESHOLD_HIGH = cfg.get("threshold_high", 0.8)
 
+# === Email 設定 & 發信函式 ===
+EMAIL_SENDER   = cfg['email']['sender']
+EMAIL_RECEIVER = cfg['email']['receiver']
+EMAIL_PASSWORD = cfg['email']['password']
+
+def send_email(subject, body):
+    msg = MIMEText(body)
+    msg['Subject'] = subject
+    msg['From']    = EMAIL_SENDER
+    msg['To']      = EMAIL_RECEIVER
+
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.set_debuglevel(0)
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.send_message(msg)
+        app.logger.info(f"[notifier] Email 已發送: {subject}")
+    except Exception as e:
+        app.logger.error(f"[notifier] 發送 Email 失敗: {e}")
+
 # === 2. 建立 Flask + SocketIO ===
 app = Flask(
     __name__,
-    static_folder="frontend/build",  # build 輸出
+    static_folder="frontend/build",
     static_url_path=""
 )
 CORS(app)
@@ -41,7 +86,6 @@ sync_trades()
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def serve(path):
-    """若請求的檔案存在就回傳，否則回傳 index.html 給 React Router"""
     build_dir = app.static_folder
     if path and os.path.exists(os.path.join(build_dir, path)):
         return send_from_directory(build_dir, path)
@@ -50,11 +94,14 @@ def serve(path):
 # === 5. API Endpoints ===
 @app.route("/api/price")
 def api_price():
-    try:
-        price = get_price(SYMBOL)
-    except Exception as e:
-        app.logger.error(f"[api_price] get_price error: {e}")
-        return jsonify({"symbol": SYMBOL, "price": None}), 200
+    with PRICE_DURATION.labels(symbol=SYMBOL).time():
+        try:
+            price = get_price(SYMBOL)
+            PRICE_SUCCESS.labels(symbol=SYMBOL).inc()
+        except Exception as e:
+            PRICE_FAILURE.labels(symbol=SYMBOL).inc()
+            app.logger.error(f"[api_price] get_price error: {e}")
+            return jsonify({"symbol": SYMBOL, "price": None}), 200
     return jsonify({"symbol": SYMBOL, "price": price})
 
 @app.route("/api/set-threshold", methods=["POST"])
@@ -164,19 +211,19 @@ def delete_note(note_id):
 
 @app.route("/api/config")
 def api_config():
-    """
-    回傳目前的 symbol 與 threshold 設定
-    """
-    # 讀取最新 cfg（這裡假設 cfg 已在全域保持最新）
     return jsonify({
         "symbol": cfg.get("symbol", SYMBOL),
         "threshold_low": cfg.get("threshold_low", THRESHOLD_LOW),
         "threshold_high": cfg.get("threshold_high", THRESHOLD_HIGH)
     })
 
+@app.route("/metrics")
+def metrics():
+    data = generate_latest()
+    return Response(data, mimetype=CONTENT_TYPE_LATEST)
+
 @socketio.on("connect")
 def on_connect():
-    """客戶端連線時，立刻推送一次當前價格"""
     try:
         price = get_price(SYMBOL)
         socketio.emit(
@@ -187,27 +234,45 @@ def on_connect():
     except Exception as e:
         app.logger.error(f"[on_connect] 推送初始價格失敗: {e}")
 
+
 def price_broadcast_thread():
-    """
-    每 30 秒抓一次，寫庫、並固定推送最新價格。
-    """
+    alert_high_sent = False
+    alert_low_sent = False
+
     while True:
         try:
-            price = get_price(SYMBOL)
+            with PRICE_DURATION.labels(symbol=SYMBOL).time():
+                price = get_price(SYMBOL)
+            PRICE_SUCCESS.labels(symbol=SYMBOL).inc()
         except Exception as e:
+            PRICE_FAILURE.labels(symbol=SYMBOL).inc()
             app.logger.error(f"[broadcast] get_price error: {e}")
             time.sleep(30)
             continue
 
         if price is not None:
             save_price(SYMBOL, price)
-            app.logger.info(f"emit price_update: {SYMBOL} {price}")
-            socketio.emit("price_update", {
-                "symbol": SYMBOL,
-                "price": price
-            })
+            PRICE_EMIT.labels(symbol=SYMBOL).inc()
+            socketio.emit("price_update", { "symbol": SYMBOL, "price": price })
+
+            # 價格高於閾值且尚未發過高價通知
+            if price > THRESHOLD_HIGH and not alert_high_sent:
+                subject = f"{SYMBOL.upper()} 價格高於 {THRESHOLD_HIGH}"
+                body = f"目前價格 ${price:.4f}，請注意可能逢高。"
+                send_email(subject, body)
+                alert_high_sent = True
+                alert_low_sent = False
+
+            # 價格低於閾值且尚未發過低價通知
+            elif price < THRESHOLD_LOW and not alert_low_sent:
+                subject = f"{SYMBOL.upper()} 價格低於 {THRESHOLD_LOW}"
+                body = f"目前價格 ${price:.4f}，可考慮加倉。"
+                send_email(subject, body)
+                alert_low_sent = True
+                alert_high_sent = False
 
         time.sleep(60)
+
 
 # === 7. 啟動 Server ===
 if __name__ == "__main__":
