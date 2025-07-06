@@ -1,5 +1,7 @@
 # Crypto Alert System
 
+## 網址:http://167.179.66.127/
+
 ## 簡介
 Crypto Alert System 是一個自動化的加密貨幣監控與通知系統，主要功能包括：
 
@@ -40,6 +42,8 @@ crypto_alert_system/
 │   └─ src/
 │       ├─ App.js
 │       └─ ...
+├── monitoring/
+│   └── prometheus.yml
 ├─ config.json            # 系統配置檔
 ├─ run.py                 # 主流程啟動腳本
 ├─ scheduler.py           # 任務排程腳本
