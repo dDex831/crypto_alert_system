@@ -5,7 +5,6 @@ import io from "socket.io-client";
 
 function TradingViewWidget() {
   useEffect(() => {
-    // 確保全域已經有 TradingView
     if (!window.TradingView) {
       console.error("TradingView script 尚未載入");
       return;
@@ -28,7 +27,6 @@ function TradingViewWidget() {
     });
   }, []);
 
-  // 注意這裡改成 tradingview-chart，跟 container_id 一致
   return <div id="tradingview-chart" style={{ width: "100%", height: 400, marginTop: 16 }} />;
 }
 
@@ -40,7 +38,7 @@ export default function PricePage() {
   const [socketConnected, setSocketConnected] = useState(false);
   const socketRef = useRef(null);
 
-  // —— ① 先讀取當前設定 —— 
+  // ① 先讀取當前設定
   useEffect(() => {
     (async () => {
       try {
@@ -51,7 +49,6 @@ export default function PricePage() {
         setHigh(cfg.threshold_high);
       } catch (err) {
         console.error("fetch config failed:", err);
-        // 如果失敗，可以給一組 fallback
         setSymbol("cardano");
         setLow(0.5);
         setHigh(0.8);
@@ -59,9 +56,9 @@ export default function PricePage() {
     })();
   }, []);
 
-  // —— ② 初始抓一次價格 —— 
+  // ② 初始抓一次價格
   useEffect(() => {
-    if (!symbol) return;  // 等 symbol 讀到後再 fetch
+    if (!symbol) return;
     (async () => {
       try {
         const res = await fetch(`/api/price?symbol=${symbol}`);
@@ -75,9 +72,15 @@ export default function PricePage() {
     })();
   }, [symbol]);
 
-  // —— ③ Socket.IO 連線 & 監聽 —— 
+  // ③ Socket.IO 連線 & 監聽
   useEffect(() => {
-    socketRef.current = io("http://localhost:5000");
+    // 使用當前域名，避免連到 localhost
+    socketRef.current = io(window.location.origin, {
+      path: "/socket.io",
+      transports: ["websocket"],
+      secure: false,
+      forceNew: true,  // ✅ 保证每次都新建连接
+    });
     const socket = socketRef.current;
 
     socket.on("connect", () => setSocketConnected(true));
@@ -93,7 +96,7 @@ export default function PricePage() {
     };
   }, [symbol]);
 
-  // —— ④ 更新 threshold 的 handler —— 
+  // ④ 更新 threshold 的 handler
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -103,17 +106,15 @@ export default function PricePage() {
         body: JSON.stringify({
           symbol,
           low: parseFloat(low),
-          high: parseFloat(high)
+          high: parseFloat(high),
         }),
       });
       alert("設定已更新！");
-      // 可選：立刻 call /api/config 重新取值
     } catch (err) {
       console.error("update threshold failed:", err);
     }
   };
 
-  // —— ⑤ JSX —— 
   return (
     <section>
       <h3>價格追蹤設定</h3>
@@ -159,7 +160,7 @@ export default function PricePage() {
       <hr />
 
       <h5>
-        即時價格{" "}
+        即時價格{' '}
         <span
           style={{
             display: "inline-block",

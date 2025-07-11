@@ -3,23 +3,18 @@
 ## 網址:http://167.179.66.127/
 
 ## 簡介
-Crypto Alert System 是一個自動化的加密貨幣監控與通知系統，主要功能包括：
+Crypto Alert System 是一個自動化的加密貨幣監控與通知系統,有python版本和C版本
 
-- **價格追蹤與通知**：定時抓取多種幣種（例如 ADA、BTC）的最新價格，並依使用者設定的上下限進行停損/停利判斷，當價格觸發條件時透過 Email 發送提醒。
-- **新聞擷取**：每日擷取區塊鏈與經濟相關主題的最高互動推文摘要，並管理快取以減少 API 呼叫。
-- **Google Sheet 紀錄**：自動將每次價格與新聞的結果寫入 Google Sheet，便於後續分析與查閱。
-- **前端控制面板**：`frontend/index.html` 提供靜態網頁，可手動觸發任務與查看最新狀態。
-- **Docker 支援**：內建 Dockerfile，一鍵建構容器映像並執行。
 
 ## 功能總覽
 1. **價格監控**：
    - 每小時取得指定幣種最新價格
-   - 自動判斷上下限並通知
+   - 自動判斷上下限並透過 Email 發送提醒
 2. **新聞彙整**：
-   - 單次呼叫 Twitter API 同步擷取區塊鏈與經濟主題推文
+   - 單次呼叫 API 同步擷取區塊鏈與經濟主題推文
    - 過濾昨日發布並選出最高互動
 3. **紀錄保存**：
-   - 價格與新聞結果同步寫入 SQLite 與 Google Sheet
+   - 價格與新聞結果同步寫入 SQLite 
 4. **排程執行**：
    - `scheduler.py` 設定任務排程（可搭配系統排程或服務管理器運行）
 5. **控制面板**：
@@ -50,6 +45,12 @@ crypto_alert_system/
 ├─ requirements.txt       # Python 相依套件列表
 ├─ Dockerfile             # Docker 映像建構設定
 └─ README.md              # 專案說明
+├── aiken_contracts/           # 智能合約 (Aiken)
+│   ├── onchain_proof/
+│   │   ├── aiken.toml
+│   │   └── src/
+│   │       └── main.ak
+│   └── README.md              # 說明此合約用途
 ```
 
 

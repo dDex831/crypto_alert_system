@@ -55,12 +55,20 @@ def send_email(subject, body):
 
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.set_debuglevel(1)   # ← 開啟偵錯
             server.login(EMAIL_SENDER, EMAIL_PASSWORD)
             server.send_message(msg)
         logging.info(f"Email 已發送: {subject}")
+    except smtplib.SMTPAuthenticationError as e:
+        logging.error(f"SMTPAuthError: {e}")
+        print(f"[SMTPAuthError] {e}")
+    except smtplib.SMTPException as e:
+        logging.error(f"SMTPException: {e}")
+        print(f"[SMTPException] {e}")
     except Exception as e:
-        logging.error(f"發送 Email 失敗: {e}")
-        print(f"[錯誤] 發送 Email 失敗: {e}")
+        logging.error(f"其他錯誤: {e}")
+        print(f"[ERROR] 發送 Email 失敗: {e}")
+
 
 # === 價格檢查主邏輯 ===
 def check_price():

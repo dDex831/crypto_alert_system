@@ -1,21 +1,35 @@
+print("📢 run.py 被執行了！")
 import os
 import json
 import threading
 import time
 import sqlite3
+import logging
 import smtplib
 from email.mime.text import MIMEText
-
+from datetime import datetime  # 新增 datetime 的匯入
 from flask import Flask, send_from_directory, request, jsonify, abort, Response
 from flask_cors import CORS
 from flask_socketio import SocketIO
+import requests
 
 from app.models.database import init_db, save_price, DB_PATH
 from app.services.price_tracker import get_price
 from app.services.binance_sync import sync_trades
 from app.services.news_fetcher import fetch_daily_news
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from base64 import b64decode
+import uuid
+from werkzeug.utils import secure_filename
+from app.models import notes as notes_model
 
+IMAGE_DIR = "/opt/crypto_alert_system/images"
+os.makedirs(IMAGE_DIR, exist_ok=True)
+
+
+# --- Logging ---
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # --- Prometheus 指標 ---
 PRICE_SUCCESS = Counter(
@@ -39,7 +53,6 @@ PRICE_EMIT = Counter(
     ['symbol']
 )
 
-
 # === 1. 讀取 config.json ===
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 with open(os.path.join(BASE_DIR, "config.json"), "r") as f:
@@ -62,12 +75,11 @@ def send_email(subject, body):
 
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.set_debuglevel(0)
             server.login(EMAIL_SENDER, EMAIL_PASSWORD)
             server.send_message(msg)
-        app.logger.info(f"[notifier] Email 已發送: {subject}")
+        logger.info(f"[notifier] Email 已發送: {subject}")
     except Exception as e:
-        app.logger.error(f"[notifier] 發送 Email 失敗: {e}")
+        logger.error(f"[notifier] 發送 Email 失敗: {e}")
 
 # === 2. 建立 Flask + SocketIO ===
 app = Flask(
@@ -100,17 +112,23 @@ def api_price():
             PRICE_SUCCESS.labels(symbol=SYMBOL).inc()
         except Exception as e:
             PRICE_FAILURE.labels(symbol=SYMBOL).inc()
-            app.logger.error(f"[api_price] get_price error: {e}")
+            logger.error(f"[api_price] get_price error: {e}")
             return jsonify({"symbol": SYMBOL, "price": None}), 200
     return jsonify({"symbol": SYMBOL, "price": price})
 
 @app.route("/api/set-threshold", methods=["POST"])
 def api_set_threshold():
+    global SYMBOL, THRESHOLD_LOW, THRESHOLD_HIGH, cfg
+
     data = request.json or {}
+    SYMBOL            = data.get("symbol", SYMBOL)
+    THRESHOLD_LOW     = data.get("low", THRESHOLD_LOW)
+    THRESHOLD_HIGH    = data.get("high", THRESHOLD_HIGH)
+
     cfg.update({
-        "symbol": data.get("symbol", SYMBOL),
-        "threshold_low": data.get("low", THRESHOLD_LOW),
-        "threshold_high": data.get("high", THRESHOLD_HIGH)
+        "symbol":         SYMBOL,
+        "threshold_low":  THRESHOLD_LOW,
+        "threshold_high": THRESHOLD_HIGH
     })
     with open(os.path.join(BASE_DIR, "config.json"), "w") as f:
         json.dump(cfg, f, indent=2)
@@ -152,9 +170,38 @@ def api_trades():
 
 @app.route("/api/news")
 def api_news():
-    return jsonify(fetch_daily_news())
+    # 原 fetch_daily_news() 返回 {'blockchain': [...], 'economy': [...], 'price': ...}
+    d = fetch_daily_news()
 
-# Notes CRUD...
+    # 合并两类新闻
+    combined = d.get("blockchain", []) + d.get("economy", [])
+
+    # 按时间戳挑最新一条
+    def _ts(item):
+        iso = item.get("publishedAt")
+        if iso:
+            try:
+                return datetime.fromisoformat(iso.replace("Z", "+00:00"))
+            except:
+                pass
+        ts = item.get("published_on")
+        if ts:
+            return datetime.utcfromtimestamp(ts)
+        return datetime.min
+
+    if combined:
+        latest = max(combined, key=_ts)
+        articles = [latest]
+    else:
+        articles = []
+
+    return jsonify({
+        "price": d.get("price"),
+        "articles": articles
+    })
+
+
+# Notes CRUD Same...
 @app.route("/api/notes", methods=["GET"])
 def list_notes():
     conn = sqlite3.connect(DB_PATH)
@@ -163,51 +210,7 @@ def list_notes():
     conn.close()
     return jsonify([dict(r) for r in rows])
 
-@app.route("/api/notes", methods=["POST"])
-def create_note():
-    data = request.json or {}
-    if not data.get("title"):
-        abort(400, "title required")
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO notes (title,code,explanation,purpose,result) VALUES (?,?,?,?,?)",
-        (data["title"], data.get("code",""), data.get("explanation",""),
-         data.get("purpose",""), data.get("result",""))
-    )
-    nid = cur.lastrowid
-    conn.commit()
-    conn.close()
-    return jsonify({"id": nid}), 201
-
-@app.route("/api/notes/<int:note_id>", methods=["PUT"])
-def update_note(note_id):
-    data = request.json or {}
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute(
-        "UPDATE notes SET title=?,code=?,explanation=?,purpose=?,result=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-        (data.get("title"), data.get("code",""), data.get("explanation",""),
-         data.get("purpose",""), data.get("result",""), note_id)
-    )
-    if cur.rowcount == 0:
-        conn.close()
-        abort(404)
-    conn.commit()
-    conn.close()
-    return jsonify({"ok": True})
-
-@app.route("/api/notes/<int:note_id>", methods=["DELETE"])
-def delete_note(note_id):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("DELETE FROM notes WHERE id=?", (note_id,))
-    if cur.rowcount == 0:
-        conn.close()
-        abort(404)
-    conn.commit()
-    conn.close()
-    return jsonify({"ok": True})
+# ... update, delete omitted for brevity
 
 @app.route("/api/config")
 def api_config():
@@ -232,13 +235,12 @@ def on_connect():
             to=request.sid
         )
     except Exception as e:
-        app.logger.error(f"[on_connect] 推送初始價格失敗: {e}")
+        logger.error(f"[on_connect] 推送初始價格失敗: {e}")
 
 
 def price_broadcast_thread():
     alert_high_sent = False
     alert_low_sent = False
-
     while True:
         try:
             with PRICE_DURATION.labels(symbol=SYMBOL).time():
@@ -246,7 +248,7 @@ def price_broadcast_thread():
             PRICE_SUCCESS.labels(symbol=SYMBOL).inc()
         except Exception as e:
             PRICE_FAILURE.labels(symbol=SYMBOL).inc()
-            app.logger.error(f"[broadcast] get_price error: {e}")
+            logger.error(f"[broadcast] get_price error: {e}")
             time.sleep(30)
             continue
 
@@ -255,29 +257,114 @@ def price_broadcast_thread():
             PRICE_EMIT.labels(symbol=SYMBOL).inc()
             socketio.emit("price_update", { "symbol": SYMBOL, "price": price })
 
-            # 價格高於閾值且尚未發過高價通知
             if price > THRESHOLD_HIGH and not alert_high_sent:
-                subject = f"{SYMBOL.upper()} 價格高於 {THRESHOLD_HIGH}"
-                body = f"目前價格 ${price:.4f}，請注意可能逢高。"
-                send_email(subject, body)
+                send_email(
+                    f"{SYMBOL.upper()} 價格高於 {THRESHOLD_HIGH}",
+                    f"目前價格 ${price:.4f}，請注意可能逢高。"
+                )
                 alert_high_sent = True
                 alert_low_sent = False
-
-            # 價格低於閾值且尚未發過低價通知
             elif price < THRESHOLD_LOW and not alert_low_sent:
-                subject = f"{SYMBOL.upper()} 價格低於 {THRESHOLD_LOW}"
-                body = f"目前價格 ${price:.4f}，可考慮加倉。"
-                send_email(subject, body)
+                send_email(
+                    f"{SYMBOL.upper()} 價格低於 {THRESHOLD_LOW}",
+                    f"目前價格 ${price:.4f}，可考慮加倉。"
+                )
                 alert_low_sent = True
                 alert_high_sent = False
 
         time.sleep(60)
 
+def scheduled_news_fetch():
+    while True:
+        now = datetime.now()
+        if now.hour == 8 and now.minute == 0:
+            try:
+                logger.info("⏰ 開始每日新聞抓取")
+                fetch_daily_news()
+            except Exception as e:
+                logger.error(f"[news_fetch] 抓取新聞失敗: {e}")
+            time.sleep(60)  # 避免重複執行
+        time.sleep(30)
+
+def scheduled_trade_sync():
+    while True:
+        try:
+            logger.info("🔄 同步 Binance 交易紀錄")
+            sync_trades()
+        except Exception as e:
+            logger.error(f"[sync_trades] 同步交易紀錄失敗: {e}")
+        time.sleep(3600)  # 每小時抓一次
+
+# === 6. 圖片上傳與存取 ===
+@app.route("/api/upload_image", methods=["POST"])
+def upload_image():
+    data = request.get_json()
+    base64_data = data.get("image")
+    if not base64_data or not base64_data.startswith("data:image/"):
+        return jsonify({"error": "Invalid image data"}), 400
+
+    try:
+        header, encoded = base64_data.split(",", 1)
+        file_ext = header.split("/")[1].split(";")[0]
+        filename = f"img_{uuid.uuid4().hex}.{file_ext}"
+        filepath = os.path.join(IMAGE_DIR, secure_filename(filename))
+        with open(filepath, "wb") as f:
+            f.write(b64decode(encoded))
+        return jsonify({"url": f"/images/{filename}"})
+    except Exception as e:
+        logger.error(f"[upload_image] 圖片儲存失敗: {e}")
+        return jsonify({"error": "Failed to save image"}), 500
+
+@app.route("/api/notes", methods=["POST"])
+def create_note():
+    data = request.get_json()
+    try:
+        note_id = notes_model.save_note(data)
+        return jsonify({"ok": True, "id": note_id})
+    except Exception as e:
+        logger.error(f"[create_note] 儲存筆記失敗: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/notes/<int:note_id>", methods=["PUT"])
+def update_note(note_id):
+    data = request.get_json()
+    data["id"] = note_id
+    try:
+        notes_model.save_note(data)
+        return jsonify({"ok": True})
+    except Exception as e:
+        logger.error(f"[update_note] 更新筆記失敗: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/notes/<int:note_id>", methods=["DELETE"])
+def delete_note(note_id):
+    try:
+        notes_model.delete_note(note_id)
+        return jsonify({"ok": True})
+    except Exception as e:
+        logger.error(f"[delete_note] 刪除筆記失敗: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 # === 7. 啟動 Server ===
 if __name__ == "__main__":
+    print("🔄 伺服器啟動中...")
+    init_db()
     sync_trades()
+    
+    # 即時價格推送
     thread = threading.Thread(target=price_broadcast_thread)
     thread.daemon = True
     thread.start()
-    socketio.run(app, host="0.0.0.0", port=5000, debug=True)
+
+    # 排程任務
+    news_thread = threading.Thread(target=scheduled_news_fetch)
+    news_thread.daemon = True
+    news_thread.start()
+
+    trade_thread = threading.Thread(target=scheduled_trade_sync)
+    trade_thread.daemon = True
+    trade_thread.start()
+
+    # 啟動 Flask Server
+    socketio.run(app, host="0.0.0.0", port=5000)
+

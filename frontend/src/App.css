@@ -36,3 +36,12 @@
     transform: rotate(360deg);
   }
 }
+/* 隐藏任何剩余的折叠按钮 */
+.navbar .navbar-toggler {
+  display: none !important;
+}
+
+/* 确保 .collapse.navbar-collapse 始终以 flex 展开 */
+.navbar .collapse.navbar-collapse {
+  display: flex !important;
+}

@@ -1,57 +1,47 @@
+// src/pages/NewsPage.js
 import React, { useEffect, useState } from "react";
 
 export default function NewsPage() {
-  const [news, setNews] = useState({ blockchain: [], economy: [] });
-  const [loading, setLoading] = useState(true);
+  const [article, setArticle] = useState(null);
 
   useEffect(() => {
-    async function fetchNews() {
-      setLoading(true);
-      try {
-        const res = await fetch("/api/news");
-        const data = await res.json();
-        setNews(data);
-      } catch (err) {
-        setNews({ blockchain: [], economy: [] });
-      }
-      setLoading(false);
-    }
-    fetchNews();
+    fetch("/api/news")
+      .then(res => res.json())
+      .then(data => {
+        console.log("NewsPage data:", data);
+        if (Array.isArray(data.articles) && data.articles.length > 0) {
+          setArticle(data.articles[0]);
+        } else {
+          setArticle(null);
+        }
+      })
+      .catch(err => {
+        console.error("取得新聞失敗:", err);
+        setArticle(null);
+      });
   }, []);
 
+  if (!article) {
+    return <p>目前沒有新聞。</p>;
+  }
+
   return (
-    <section>
-      <h3>每日新聞摘要</h3>
-      {loading ? (
-        <div>載入中...</div>
-      ) : (
-        <>
-          <h5>🔗 區塊鏈熱門文章</h5>
-          {news.blockchain.map((i, idx) => (
-            <div className="mb-4" key={idx}>
-              <p>{i.title}</p>
-              {i.image && <img src={i.image} alt="" style={{ maxWidth: "100%", borderRadius: 8 }} />}
-              <p>
-                <a href={i.url} target="_blank" rel="noopener noreferrer">
-                  閱讀原文
-                </a>
-              </p>
-            </div>
-          ))}
-          <h5>💹 經濟熱門文章</h5>
-          {news.economy.map((i, idx) => (
-            <div className="mb-4" key={idx}>
-              <p>{i.title}</p>
-              {i.image && <img src={i.image} alt="" style={{ maxWidth: "100%", borderRadius: 8 }} />}
-              <p>
-                <a href={i.url} target="_blank" rel="noopener noreferrer">
-                  閱讀原文
-                </a>
-              </p>
-            </div>
-          ))}
-        </>
-      )}
-    </section>
+    <div>
+      <h3>最新新聞</h3>
+      <div className="card">
+        {article.image && (
+          <img src={article.image} className="card-img-top" alt="" />
+        )}
+        <div className="card-body">
+          <h5 className="card-title">{article.title}</h5>
+          <p className="card-text">
+            <small className="text-muted">{article.source}</small>
+          </p>
+          <a href={article.url} className="btn btn-primary" target="_blank" rel="noreferrer">
+            閱讀原文
+          </a>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -1,0 +1,5 @@
+{
+  // 让 Pylance 在分析时，把项目根目录也当成搜索路径
+  "python.analysis.extraPaths": ["."],
+  "python.autoComplete.extraPaths": ["."]
+}
